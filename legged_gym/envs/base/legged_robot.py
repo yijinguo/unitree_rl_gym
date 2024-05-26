@@ -18,8 +18,11 @@ from legged_gym.utils.isaacgym_utils import get_euler_xyz as get_euler_xyz_in_te
 from legged_gym.utils.helpers import class_to_dict
 from .legged_robot_config import LeggedRobotCfg
 
+from PIL import Image
+import imageio
+
 class LeggedRobot(BaseTask):
-    def __init__(self, cfg: LeggedRobotCfg, sim_params, physics_engine, sim_device, headless):
+    def __init__(self, cfg: LeggedRobotCfg, sim_params, physics_engine, sim_device, headless, set_depth_camera=True):
         """ Parses the provided config file,
             calls create_sim() (which creates, simulation and environments),
             initilizes pytorch buffers used during training
@@ -40,11 +43,208 @@ class LeggedRobot(BaseTask):
         self._parse_cfg(self.cfg)
         super().__init__(self.cfg, sim_params, physics_engine, sim_device, headless)
 
-        if not self.headless:
-            self.set_camera(self.cfg.viewer.pos, self.cfg.viewer.lookat)
+        # if not self.headless:
+        self.set_camera(self.cfg.viewer.pos, self.cfg.viewer.lookat) 
         self._init_buffers()
         self._prepare_reward_function()
         self.init_done = True
+
+                # self.camera_width = 848
+        # self.camera_height = 480
+        # self.camera_width = 848
+        # self.camera_height = 480
+        self.camera_width = 960 # iphone
+        self.camera_height = 736 # iphone
+
+        # self.horizontal_fov = 86
+        # self.horizontal_fov = 87 # D405
+        self.horizontal_fov = 71.36 # Iphone
+        self.box_length = []
+        self.box_width = []
+        self.box_height = []
+        self.camera_offset_y = []
+        self.camera_rotation_z = []
+        # self.vertical_fov = 58 # D405
+        self.object_number = []
+
+        self.use_depth_camera = set_depth_camera
+        if(set_depth_camera):
+            self.set_depth_camera()
+            self.depth_images = torch.zeros((self.num_envs, self.camera_height, self.camera_width))
+            # self.latency_depth_images = torch.zeros((self.num_envs, 60, 100))
+        # for depth images update
+
+    def save_video(self, path):
+        # file_path = os.path.join(path, i)
+        for env_id in range(self.num_envs):
+            file_path = os.path.join(path, f'{env_id}.mp4')
+            imageio.mimsave(file_path, self.frames[env_id], fps=10)
+            if (env_id == 10):
+                break
+        
+    def update_RGB_image(self):
+        # farthest_distance = 10
+        self.gym.fetch_results(self.sim, True)
+        self.gym.step_graphics(self.sim)
+        self.gym.render_all_camera_sensors(self.sim)
+        RGB_images = []
+        for i in range(self.num_envs):
+            RGB_image = self.gym.get_camera_image(self.sim, self.envs[i], self.camera_handles[i][0],
+                                                    gymapi.IMAGE_COLOR)
+            RGB_images.append(RGB_image)
+        self.RGB_images = torch.from_numpy(np.array(RGB_images)).to(self.device)
+
+    def get_frame(self):
+        self.update_RGB_image()
+        for env_id in range(self.num_envs):
+            rgba_image = self.RGB_images[env_id].reshape(self.camera_height,self.camera_width, 4)
+            rgb_img = rgba_image[..., :3]
+            log_img = rgb_img.cpu().detach().numpy().astype(np.uint8)
+            self.frames[env_id].append(log_img)
+
+    def save_RGB_image(self, filename):
+        # farthest_distance = 10
+        self.gym.fetch_results(self.sim, True)
+        self.gym.step_graphics(self.sim)
+        self.gym.render_all_camera_sensors(self.sim)
+        RGB_images = []
+        # print('num_env:', self.num_envs)
+        for i in range(self.num_envs):
+            RGB_image = self.gym.get_camera_image(self.sim, self.envs[i], self.camera_handles[i][0],
+                                                    gymapi.IMAGE_COLOR)
+            # print(RGB_image.shape)
+            RGB_image = RGB_image.reshape(self.camera_height, self.camera_width, 4)
+            image = Image.fromarray(np.array(RGB_image))
+            store_path = filename.replace('.png',f'_{i}.png')
+            image.save(store_path)
+            RGB_images.append(RGB_image)
+        self.RGB_images = torch.from_numpy(np.array(RGB_images)).to(self.device)
+
+    def set_depth_camera(self):
+        self.camera_handles = [[]]
+        for i in range(self.num_envs):
+            self.camera_handles.append([])
+            camera_properties = gymapi.CameraProperties()
+            camera_properties.width = self.camera_width
+            camera_properties.height = self.camera_height
+            camera_properties.horizontal_fov = self.horizontal_fov
+
+            h = self.gym.create_camera_sensor(self.envs[i], camera_properties)
+            pos = self.env_origins[i].clone()
+            pos = gymapi.Vec3(*pos)
+                       # camera_offset = gymapi.Vec3(0.27, 0, -0.08)
+            # camera_offset = gymapi.Vec3(0.23, 0, -0.08)
+            # original_vector = gymapi.Vec3(0, 0, 1)
+            camera_offset = gymapi.Vec3(0, -1, 0.2) # 从前看向🐶
+            # camera_offset = gymapi.Vec3(0, 0, 1)
+            # rotated_vector = q * original_vector * q.inverse()
+            # angle = np.arccos(rotated_vector.dot(target_direction) / (rotated_vector.length() * target_direction.length()))
+
+            # 默认朝前
+            camera_rotation = gymapi.Quat.from_axis_angle(gymapi.Vec3(0, 0, 1), np.deg2rad(60)) # 从前看向🐶
+            # camera_rotation = gymapi.Quat.from_axis_angle(gymapi.Vec3(0, 1, 0), np.deg2rad(60))
+            # print("angle", angle)
+
+            actor_handle = self.gym.get_actor_handle(self.envs[i], 0)
+            #rigid body with index0: base
+            body_handle = self.gym.get_actor_rigid_body_handle(self.envs[i], actor_handle, 0)
+
+            self.gym.attach_camera_to_body(h, self.envs[i], body_handle, gymapi.Transform(camera_offset, camera_rotation),
+                                        gymapi.FOLLOW_TRANSFORM)
+
+            self.gym.set_camera_location(h, self.envs[i], gymapi.Vec3(0.5,-2,1) + pos, gymapi.Vec3(0.5,0,0.6) + pos)
+            self.camera_handles[i].append(h)
+            # camera_properties = gymapi.CameraProperties()
+            # camera_properties.width = self.camera_width
+            # camera_properties.height = self.camera_height
+            # # camera_properties.horizontal_fov = 90.20305183944023
+            # camera_properties.horizontal_fov = self.horizontal_fov
+            # # camera_properties.vertical_fov = self.vertical_fov
+            # # camera_properties.horizontal_fov = 180
+
+            # h = self.gym.create_camera_sensor(self.envs[i], camera_properties)
+            # pos = self.env_origins[i].clone()
+            # pos = gymapi.Vec3(*pos)
+
+            # # camera_offset = gymapi.Vec3(0.27, 0, -0.08)
+            # # camera_offset = gymapi.Vec3(0.27, 0, -0.06)
+            # camera_offset = gymapi.Vec3(0.24, 0, 0.14)
+            # # camera_rotation = gymapi.Quat.from_axis_angle(gymapi.Vec3(0, 1, 0), np.deg2rad(60))
+            # camera_rotation = gymapi.Quat.from_axis_angle(gymapi.Vec3(0, 1, 0), np.deg2rad(65)) # thick obj
+            # # print("angle", angle)
+
+            # # y_random_offset = np.random.uniform(-0.05, 0.05)
+            # y_random_offset = np.random.uniform(-0.0, -0.0) # eval only 
+            # camera_offset.y += y_random_offset
+            # self.camera_offset_y.append(y_random_offset)
+
+            # # z_random_rotation_degree = np.random.uniform(-30, 30)
+            # z_random_rotation_degree = np.random.uniform(0,0) # eval only
+            # z_random_rotation = gymapi.Quat.from_axis_angle(gymapi.Vec3(1, 0, 0), np.deg2rad(z_random_rotation_degree))
+            # self.camera_rotation_z.append(z_random_rotation_degree)
+            # # 将新的z方向的旋转与原始旋转结合
+            # def quat_multiply(q1, q2):
+            #     x1, y1, z1, w1 = q1.x, q1.y, q1.z, q1.w
+            #     x2, y2, z2, w2 = q2.x, q2.y, q2.z, q2.w
+
+            #     x = w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2
+            #     y = w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2
+            #     z = w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2
+            #     w = w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2
+
+            #     return gymapi.Quat(x, y, z, w)
+
+            # camera_rotation = quat_multiply(camera_rotation, z_random_rotation)
+
+            # actor_handle = self.gym.get_actor_handle(self.envs[i], 0)
+            # # #rigid body with index0: base
+            # body_handle = self.gym.get_actor_rigid_body_handle(self.envs[i], actor_handle, 0)
+
+            # self.gym.attach_camera_to_body(h, self.envs[i], body_handle, gymapi.Transform(camera_offset, camera_rotation),
+            #                           gymapi.FOLLOW_TRANSFORM)
+
+            # # actor_handle = self.gym.get_actor_handle(self.envs[i], 0)
+            # # #rigid body with index0: base
+            # # body_handle = self.gym.get_actor_rigid_body_handle(self.envs[i], actor_handle, 0)
+
+            # # self.gym.attach_camera_to_body(h, self.envs[i], body_handle, gymapi.Transform(camera_offset, camera_rotation),
+            # #                           gymapi.FOLLOW_TRANSFORM)
+            # self.camera_handles[i].append(h)
+
+
+            # camera_properties = gymapi.CameraProperties()
+            # camera_properties.width = self.camera_width
+            # camera_properties.height = self.camera_height
+
+            # camera_properties.horizontal_fov = self.horizontal_fov
+
+            # h = self.gym.create_camera_sensor(self.envs[i], camera_properties)
+            # pos = self.env_origins[i].clone()
+            # pos = gymapi.Vec3(*pos)
+            
+            # # camera_offset = gymapi.Vec3(0.27, 0, -0.08)
+            # # camera_offset = gymapi.Vec3(0.23, 0, -0.08)
+            # # original_vector = gymapi.Vec3(0, 0, 1)
+            # # camera_offset = gymapi.Vec3(0, -1, 0.2) # 从前看向🐶
+            # # camera_offset = gymapi.Vec3(0, 0, 1)
+            # # rotated_vector = q * original_vector * q.inverse()
+            # # angle = np.arccos(rotated_vector.dot(target_direction) / (rotated_vector.length() * target_direction.length()))
+
+            # # 默认朝前
+            # # camera_rotation = gymapi.Quat.from_axis_angle(gymapi.Vec3(0, 0, 1), np.deg2rad(90)) # 从前看向🐶
+            # # camera_rotation = gymapi.Quat.from_axis_angle(gymapi.Vec3(0, 1, 0), np.deg2rad(60))
+            # # print("angle", angle)
+
+            # # actor_handle = self.gym.get_actor_handle(self.envs[i], 0)
+            # # #rigid body with index0: base
+            # # body_handle = self.gym.get_actor_rigid_body_handle(self.envs[i], actor_handle, 0)
+
+            # # self.gym.attach_camera_to_body(h, self.envs[i], body_handle, gymapi.Transform(camera_offset, camera_rotation),
+            #                         #   gymapi.FOLLOW_TRANSFORM)
+
+            # self.gym.set_camera_location(h, self.envs[i], gymapi.Vec3(0.5,-1,1) + pos, gymapi.Vec3(0.5,0,0.2) + pos)
+            # self.camera_handles[i].append(h)
+
 
     def step(self, actions):
         """ Apply actions, simulate, call self.post_physics_step()
@@ -594,6 +794,8 @@ class LeggedRobot(BaseTask):
         for i in range(len(termination_contact_names)):
             self.termination_contact_indices[i] = self.gym.find_actor_rigid_body_handle(self.envs[0], self.actor_handles[0], termination_contact_names[i])
 
+        self.frames = {env_id: [] for env_id in range(self.num_envs)}  # 初始化 
+
     def _get_env_origins(self):
         """ Sets environment origins. On rough terrain the origins are defined by the terrain platforms.
             Otherwise create a grid.
@@ -715,3 +917,45 @@ class LeggedRobot(BaseTask):
     def _reward_feet_contact_forces(self):
         # penalize high contact forces
         return torch.sum((torch.norm(self.contact_forces[:, self.feet_indices, :], dim=-1) -  self.cfg.rewards.max_contact_force).clip(min=0.), dim=1)
+
+
+
+    
+
+    # _reward_lin_vel_z: 惩罚机器人在Z轴方向上的线性速度，即垂直速度。
+
+    # _reward_ang_vel_xy: 惩罚机器人在XY平面上的角速度。
+
+    # _reward_orientation: 惩罚机器人基座的非水平方向，即机器人的倾斜。
+
+    # _reward_base_height: 惩罚机器人基座高度与目标高度的偏差。
+
+    # _reward_torques: 惩罚机器人关节扭矩的大小。
+
+    # _reward_dof_vel: 惩罚机器人关节速度的大小。
+
+    # _reward_dof_acc: 惩罚机器人关节加速度的大小。
+
+    # _reward_action_rate: 惩罚动作频率的变化，即连续动作之间的差异。
+
+    # _reward_collision: 惩罚机器人选定部位的碰撞。
+
+    # _reward_termination: 终端奖励或惩罚，通常与重置状态或时间限制有关。
+
+    # _reward_dof_pos_limits: 惩罚关节位置接近其限制。
+
+    # _reward_dof_vel_limits: 惩罚关节速度接近其速度限制。
+
+    # _reward_torque_limits: 惩罚扭矩接近其限制。
+
+    # _reward_tracking_lin_vel: 奖励机器人跟踪线性速度命令（XY轴）的能力。
+
+    # _reward_tracking_ang_vel: 奖励机器人跟踪角速度命令（偏航）的能力。
+
+    # _reward_feet_air_time: 奖励机器人在空中的步态时间，即长步态。
+
+    # _reward_stumble: 惩罚机器人的脚部撞击垂直表面。
+
+    # _reward_stand_still: 惩罚机器人在零命令下的移动。
+
+    # _reward_feet_contact_forces: 惩罚机器人脚部接触力过大。

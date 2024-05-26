@@ -1,4 +1,4 @@
-from legged_gym.envs.base.legged_robot_config import LeggedRobotCfg, LeggedRobotCfgPPO
+from legged_gym.envs.base.legged_robot_config import LeggedRobotCfg, LeggedRobotCfgPPO, LeggedRobotCfgSAC
 
 class H1RoughCfg( LeggedRobotCfg ):
     class init_state( LeggedRobotCfg.init_state ):
@@ -15,19 +15,19 @@ class H1RoughCfg( LeggedRobotCfg ):
            'right_knee_joint' : 0.8,                                             
            'right_ankle_joint' : -0.4,                                     
            'torso_joint' : 0., 
-           'left_shoulder_pitch_joint' : 0., 
+           'left_shoulder_pitch_joint' : 0.5, 
            'left_shoulder_roll_joint' : 0, 
-           'left_shoulder_yaw_joint' : 0.,
-           'left_elbow_joint'  : 0.,
-           'right_shoulder_pitch_joint' : 0.,
-           'right_shoulder_roll_joint' : 0.0,
-           'right_shoulder_yaw_joint' : 0.,
-           'right_elbow_joint' : 0.,
+           'left_shoulder_yaw_joint' : 0,
+           'left_elbow_joint'  : 0,
+           'right_shoulder_pitch_joint' : 0.5,
+           'right_shoulder_roll_joint' : 0,
+           'right_shoulder_yaw_joint' : 0,
+           'right_elbow_joint' : 0,
         }
     
     class env(LeggedRobotCfg.env):
-        num_observations = 42
-        num_actions = 10
+        num_observations = 69
+        num_actions = 19
       
 
     class control( LeggedRobotCfg.control ):
@@ -39,7 +39,7 @@ class H1RoughCfg( LeggedRobotCfg ):
                      'hip_pitch': 200,
                      'knee': 300,
                      'ankle': 40,
-                     'torso': 300,
+                     'torso': 500,
                      'shoulder': 100,
                      "elbow":100,
                      }  # [N*m/rad]
@@ -48,7 +48,7 @@ class H1RoughCfg( LeggedRobotCfg ):
                      'hip_pitch': 5,
                      'knee': 6,
                      'ankle': 2,
-                     'torso': 6,
+                     'torso': 8,
                      'shoulder': 2,
                      "elbow":2,
                      }  # [N*m/rad]  # [N*m*s/rad]
@@ -74,7 +74,7 @@ class H1RoughCfg( LeggedRobotCfg ):
             tracking_ang_vel = 0.5
             lin_vel_z = -2.0
             ang_vel_xy = -1.0
-            orientation = -1.0
+            orientation = -5.0
             base_height = -100.0
             dof_acc = -3.5e-8
             feet_air_time = 1.0
@@ -90,4 +90,10 @@ class H1RoughCfgPPO( LeggedRobotCfgPPO ):
         run_name = ''
         experiment_name = 'h1'
 
-  
+
+class H1RoughCfgSAC( LeggedRobotCfgSAC ):
+    # class algorithm( LeggedRobotCfgSAC.algorithm ):
+    #     entropy_coef = 0.01
+    class runner( LeggedRobotCfgSAC.runner ):
+        run_name = ''
+        experiment_name = 'h1'

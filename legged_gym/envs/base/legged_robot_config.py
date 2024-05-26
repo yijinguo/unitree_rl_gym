@@ -94,6 +94,9 @@ class LeggedRobotCfg(BaseConfig):
         friction_range = [0.5, 1.25]
         randomize_base_mass = False
         added_mass_range = [-1., 1.]
+        # randomize_kp_kd = True
+        # kp_range = [23.,33.]
+        # kd_range = [0.60,0.80]
         push_robots = True
         push_interval_s = 15
         max_push_vel_xy = 1.
@@ -116,7 +119,7 @@ class LeggedRobotCfg(BaseConfig):
             action_rate = -0.01
             stand_still = -0.
 
-        only_positive_rewards = True # if true negative total rewards are clipped at zero (avoids early termination problems)
+        only_positive_rewards = False # if true negative total rewards are clipped at zero (avoids early termination problems)
         tracking_sigma = 0.25 # tracking reward = exp(-error^2/sigma)
         soft_dof_pos_limit = 1. # percentage of urdf limits, values above this limit are penalized
         soft_dof_vel_limit = 1.
@@ -201,6 +204,41 @@ class LeggedRobotCfgPPO(BaseConfig):
     class runner:
         policy_class_name = 'ActorCritic'
         algorithm_class_name = 'PPO'
+        num_steps_per_env = 50 # per iteration
+        max_iterations = 1500 # number of policy updates
+
+        # logging
+        save_interval = 50 # check for potential saves every this many iterations
+        experiment_name = 'test'
+        run_name = ''
+        # load and resume
+        resume = False
+        load_run = -1 # -1 = last run
+        checkpoint = -1 # -1 = last saved model
+        resume_path = None # updated from load_run and chkpt
+
+class LeggedRobotCfgSAC(BaseConfig):
+    seed = 1
+    runner_class_name = 'OnPolicyRunner'
+    class policy:
+        hidden_dim=256
+        
+    class algorithm:
+        # training params
+        alpha=0.2
+        num_learning_epochs=1
+        num_mini_batches=1
+        gamma=0.99
+        lam=0.95
+        alpha_lr=1e-3
+        critic_lr=1e-3
+        auto_entropy=True
+        # target_entropy=-torch.prod(torch.tensor(actor_critic.action_space.shape)).item(),
+        # device='cpu',
+
+    class runner:
+        policy_class_name = 'ActorCritic_SAC'
+        algorithm_class_name = 'SAC'
         num_steps_per_env = 24 # per iteration
         max_iterations = 1500 # number of policy updates
 
